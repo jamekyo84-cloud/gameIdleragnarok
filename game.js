@@ -38,6 +38,17 @@
     lootLog: [],        // recent loot entries [{id, n, t}]
     shopCat: 'pots',
     sellJunk: false,    // auto-sell junk on pickup
+    // P2W
+    cash: 0,            // Kafra Coins
+    totalSpent: 0,      // Kafra Coins ever bought (for stats / VIP whale tier)
+    vipUntil: 0,        // ms timestamp; 0 = no VIP
+    buffs: {},          // buffId -> expiryTs (ms)
+    cashCat: 'buffs',
+    pityCount: 0,       // gacha pity counter
+    gachaHistory: [],   // last 30 pulls [{id, t, rarity}]
+    lastDailyTs: 0,     // last daily reward claim
+    // Admin
+    admin: false,       // unlocked by triple-clicking logo or ?admin=1
     lastTs: Date.now(),
     log: [],
   });
@@ -58,6 +69,37 @@
       for (const k of Object.keys(item.mods)) acc[k] = (acc[k] || 0) + item.mods[k];
     }
     return acc;
+  }
+
+  // ---------------- Buffs / VIP ----------------
+  function isVip() { return state.vipUntil && Date.now() < state.vipUntil; }
+  function buffActive(id) {
+    return state.buffs && state.buffs[id] && state.buffs[id] > Date.now();
+  }
+  // Returns multipliers: { exp, drop, zeny, aspd }
+  function buffMultipliers() {
+    const m = { exp: 1, drop: 1, zeny: 1, aspd: 1 };
+    // Equip-based percentage bonuses
+    const eq = aggregateEquipMods();
+    if (eq.expPctBonus) m.exp *= 1 + eq.expPctBonus;
+    if (eq.zenyPctBonus) m.zeny *= 1 + eq.zenyPctBonus;
+    // Active buffs
+    if (buffActive('exp_scroll_2x')) m.exp *= 2;
+    if (buffActive('battle_manual')) m.exp *= 1.5;
+    if (buffActive('drop_scroll_2x')) m.drop *= 2;
+    if (buffActive('bubble_gum'))    m.drop *= 2;
+    if (buffActive('zeny_scroll_2x'))m.zeny *= 2;
+    // VIP
+    if (isVip()) {
+      m.exp  *= 1.5;
+      m.drop *= 1.3;
+      m.zeny *= 1.2;
+    }
+    // Admin god-mode boosts (also flag-driven from admin menu)
+    if (state.admin && state.adminBoost) {
+      m.exp *= 10; m.drop *= 5; m.zeny *= 10;
+    }
+    return m;
   }
 
   function passiveBonuses() {
@@ -294,10 +336,11 @@
   function onEnemyDead() {
     if (!enemy) return;
     const d = computeDerived();
-    const expGain = enemy.exp;
-    const jexpGain = enemy.jexp;
+    const mult = buffMultipliers();
+    const expGain = Math.floor(enemy.exp * mult.exp);
+    const jexpGain = Math.floor(enemy.jexp * mult.exp);
     const zenyBase = irand(enemy.zeny[0], enemy.zeny[1]);
-    const zenyGain = Math.floor(zenyBase * (1 + (d.zenyPct || 0)));
+    const zenyGain = Math.floor(zenyBase * (1 + (d.zenyPct || 0)) * mult.zeny);
     state.exp += expGain;
     state.jexp += jexpGain;
     state.zeny += zenyGain;
@@ -320,8 +363,9 @@
     }
     // Random drops (LUK boosts proc rate slightly)
     const lukBoost = 1 + (effStats().luk * 0.0015);
+    const dropMult = mult.drop;
     for (const [itemId, chance] of (enemy.drops || [])) {
-      if (Math.random() < chance * lukBoost) {
+      if (Math.random() < chance * lukBoost * dropMult) {
         addItem(itemId, 1, { fromDrop: true });
         const it = ITEMS[itemId];
         const r = RARITY[it?.rarity || 'common'];
@@ -496,14 +540,272 @@
 
   function useItem(id) {
     const it = ITEMS[id];
-    if (!it || it.type !== 'pot') return;
-    const d = computeDerived();
-    if (it.heal) state.hp = Math.min(d.maxHp, state.hp + it.heal);
-    if (it.healSp) state.sp = Math.min(d.maxSp, state.sp + it.healSp);
-    removeItem(id, 1);
-    log(`Used <b>${it.name}</b>.`, 'info');
+    if (!it) return;
+    if (it.type === 'pot') {
+      const d = computeDerived();
+      if (it.heal) state.hp = Math.min(d.maxHp, state.hp + it.heal);
+      if (it.healSp) state.sp = Math.min(d.maxSp, state.sp + it.healSp);
+      removeItem(id, 1);
+      log(`Used <b>${it.name}</b>.`, 'info');
+      UI.renderAll();
+      return;
+    }
+    if (it.type === 'voucher') {
+      useVoucher(id);
+      return;
+    }
+  }
+
+  function useVoucher(id) {
+    const it = ITEMS[id];
+    if (!it || (state.inventory[id] || 0) <= 0) return;
+    let consumed = true;
+    const now = Date.now();
+    switch (id) {
+      case 'vip_card_7d':
+        state.vipUntil = Math.max(state.vipUntil, now) + 7 * 24 * 3600 * 1000;
+        log('VIP activated for <b>7 days</b>! +50% EXP, +30% drop, +20% zeny.', 'ok');
+        toast('VIP active for 7 days');
+        break;
+      case 'vip_card_30d':
+        state.vipUntil = Math.max(state.vipUntil, now) + 30 * 24 * 3600 * 1000;
+        log('VIP activated for <b>30 days</b>!', 'ok');
+        toast('VIP active for 30 days');
+        break;
+      case 'exp_scroll_2x':
+        state.buffs[id] = Math.max(state.buffs[id] || 0, now) + 60 * 60 * 1000;
+        log('EXP x2 active for 1 hour.', 'ok'); break;
+      case 'drop_scroll_2x':
+        state.buffs[id] = Math.max(state.buffs[id] || 0, now) + 60 * 60 * 1000;
+        log('Drop x2 active for 1 hour.', 'ok'); break;
+      case 'zeny_scroll_2x':
+        state.buffs[id] = Math.max(state.buffs[id] || 0, now) + 60 * 60 * 1000;
+        log('Zeny x2 active for 1 hour.', 'ok'); break;
+      case 'bubble_gum':
+        state.buffs[id] = Math.max(state.buffs[id] || 0, now) + 30 * 60 * 1000;
+        log('Bubble Gum: drop x2 for 30 minutes.', 'ok'); break;
+      case 'battle_manual':
+        state.buffs[id] = Math.max(state.buffs[id] || 0, now) + 30 * 60 * 1000;
+        log('Battle Manual: EXP x1.5 for 30 minutes.', 'ok'); break;
+      case 'full_restore': {
+        const d = computeDerived();
+        state.hp = d.maxHp; state.sp = d.maxSp;
+        log('Fully restored.', 'ok'); break;
+      }
+      case 'bloody_branch': {
+        // Force-spawn a random boss
+        const bosses = Object.keys(MONSTERS).filter(k => MONSTERS[k].boss);
+        const bid = pick(bosses);
+        forceSpawnBoss(bid);
+        break;
+      }
+      case 'reset_stone': {
+        let total = 0;
+        for (const k of Object.keys(state.stats)) {
+          const cur = state.stats[k];
+          // refund based on cumulative cost
+          for (let i = 1; i < cur; i++) total += statCost(i);
+          state.stats[k] = 1;
+        }
+        state.statPoints += total;
+        log(`Stat reset! Refunded <b>${total}</b> stat points.`, 'ok');
+        break;
+      }
+      case 'skill_reset': {
+        let total = 0;
+        for (const sid of Object.keys(state.skills)) {
+          const sk = SKILLS[sid];
+          if (!sk || sk.fixed) continue;
+          const lv = state.skills[sid] || 0;
+          total += lv * (sk.cost || 1);
+          state.skills[sid] = 0;
+          if (sid === 'basic_attack') state.skills[sid] = 1;
+        }
+        state.skillPoints += total;
+        log(`Skill reset! Refunded <b>${total}</b> skill points.`, 'ok');
+        break;
+      }
+      default: consumed = false;
+    }
+    if (consumed) removeItem(id, 1);
     UI.renderAll();
   }
+
+  function forceSpawnBoss(bossId) {
+    const tpl = MONSTERS[bossId];
+    if (!tpl) return;
+    enemy = null;
+    // Build a boss enemy without map scaling
+    const map = MAPS.find(m => m.id === state.mapId) || MAPS[0];
+    const scale = 1 + (map.minLv - 1) * 0.04;
+    enemy = {
+      id: bossId, name: tpl.name, emoji: tpl.emoji,
+      lv: Math.max(1, map.minLv + 5),
+      maxHp: Math.floor(tpl.hp * scale),
+      hp: Math.floor(tpl.hp * scale),
+      atk: Math.floor(tpl.atk * scale),
+      def: Math.floor(tpl.def * scale),
+      exp: Math.floor(tpl.exp * scale),
+      jexp: Math.floor(tpl.jexp * scale),
+      zeny: tpl.zeny.map(v => Math.floor(v * scale)),
+      drops: tpl.drops || [],
+      boss: true,
+      attackTimer: 0,
+      attackInterval: 1.4 + Math.random() * 0.6,
+    };
+    UI.renderEnemy();
+    UI.spawnFx();
+    log(`A <b>${tpl.name}</b> appeared!`, 'bad');
+    toast(`Boss: ${tpl.name}!`);
+  }
+
+  // ---------------- Cash shop / Top-up / Gacha ----------------
+  function topUp(packId) {
+    const p = CASH_TOPUP.find(x => x.id === packId);
+    if (!p) return;
+    const total = p.coins + p.bonus;
+    state.cash += total;
+    state.totalSpent += p.coins;
+    log(`💎 Top-up: <b>${p.name}</b> — +${total} Kafra Coins (incl. ${p.bonus} bonus).`, 'ok');
+    toast(`+${total} 💎 Kafra Coins`);
+    UI.renderAll();
+  }
+
+  function buyCash(id) {
+    const item = CASH_SHOP.find(x => x.id === id);
+    if (!item) return;
+    if (state.cash < item.cost) { toast('Not enough Kafra Coins'); return; }
+    state.cash -= item.cost;
+    addItem(id, 1);
+    const it = ITEMS[id];
+    log(`💎 Purchased <b>${it.name}</b> for ${item.cost} 💎.`, 'ok');
+    toast(`+ ${it.name}`);
+    UI.renderAll();
+  }
+
+  function gachaPull(times = 1) {
+    const cost = times === 10 ? GACHA.cost10 : GACHA.cost * times;
+    if (state.cash < cost) { toast('Not enough Kafra Coins'); return; }
+    state.cash -= cost;
+    const totalWeight = GACHA.pool.reduce((s, [_, w]) => s + w, 0);
+    const results = [];
+    for (let i = 0; i < times; i++) {
+      let drop;
+      state.pityCount += 1;
+      // Pity: every Nth pull guarantees a legendary or higher
+      if (state.pityCount >= GACHA.pity) {
+        const legendaries = GACHA.pool.filter(([id, _]) => {
+          const it = ITEMS[id]; return it && (it.rarity === 'legendary' || it.rarity === 'mythic');
+        });
+        const total = legendaries.reduce((s, [, w]) => s + w, 0);
+        let r = Math.random() * total;
+        for (const [id, w] of legendaries) { r -= w; if (r <= 0) { drop = id; break; } }
+        if (!drop) drop = legendaries[0][0];
+        state.pityCount = 0;
+      } else {
+        let r = Math.random() * totalWeight;
+        for (const [id, w] of GACHA.pool) {
+          r -= w;
+          if (r <= 0) { drop = id; break; }
+        }
+        if (!drop) drop = GACHA.pool[0][0];
+        const it = ITEMS[drop];
+        if (it && (it.rarity === 'legendary' || it.rarity === 'mythic')) {
+          state.pityCount = 0;
+        }
+      }
+      addItem(drop, 1);
+      const it = ITEMS[drop];
+      const r = RARITY[it?.rarity || 'common'];
+      results.push({ id: drop, name: it?.name || drop, rarity: it?.rarity || 'common', color: r?.color });
+      state.gachaHistory.unshift({ id: drop, t: Date.now(), rarity: it?.rarity || 'common' });
+    }
+    if (state.gachaHistory.length > 50) state.gachaHistory.length = 50;
+    UI.showGachaResult(results);
+    UI.renderAll();
+  }
+
+  function claimDaily() {
+    const now = Date.now();
+    if (state.lastDailyTs && now - state.lastDailyTs < DAILY_COOLDOWN_MS) {
+      const remain = DAILY_COOLDOWN_MS - (now - state.lastDailyTs);
+      toast(`Next daily in ${formatTime(remain / 1000)}`);
+      return;
+    }
+    state.lastDailyTs = now;
+    state.cash += DAILY_REWARD.coins;
+    log(`🎁 ${DAILY_REWARD.label}`, 'ok');
+    toast(`+${DAILY_REWARD.coins} 💎 Daily reward!`);
+    UI.renderAll();
+  }
+
+  // ---------------- Admin (cheats) ----------------
+  const Admin = {
+    unlock() { state.admin = true; toast('Admin mode unlocked'); UI.renderAll(); UI.renderAdmin(); },
+    lock()   { state.admin = false; UI.renderAll(); UI.renderAdmin(); },
+    addZeny(n) { state.zeny += n; log(`[ADMIN] +${n.toLocaleString()} z`, 'info'); UI.renderAll(); },
+    addCash(n) { state.cash += n; log(`[ADMIN] +${n} 💎`, 'info'); UI.renderAll(); },
+    addExp(n)  { state.exp += n; checkLevelUp(); log(`[ADMIN] +${n} EXP`, 'info'); UI.renderAll(); },
+    addJexp(n) { state.jexp += n; checkLevelUp(); log(`[ADMIN] +${n} JEXP`, 'info'); UI.renderAll(); },
+    addStat(n) { state.statPoints += n; log(`[ADMIN] +${n} stat pts`, 'info'); UI.renderAll(); },
+    addSkill(n){ state.skillPoints += n; log(`[ADMIN] +${n} skill pts`, 'info'); UI.renderAll(); },
+    setLevel(lv) {
+      lv = clamp(parseInt(lv, 10) || 1, 1, 200);
+      state.baseLv = lv;
+      state.statPoints += lv * 4;
+      const d = computeDerived(); state.hp = d.maxHp; state.sp = d.maxSp;
+      log(`[ADMIN] Set Lv ${lv}`, 'info'); UI.renderAll();
+    },
+    setJobLv(lv) {
+      lv = clamp(parseInt(lv, 10) || 1, 1, 50);
+      state.jobLv = lv;
+      state.skillPoints += lv;
+      log(`[ADMIN] Set Job Lv ${lv}`, 'info'); UI.renderAll();
+    },
+    becomeJob(j) {
+      if (!JOBS[j]) { toast('Unknown job'); return; }
+      state.job = j;
+      const d = computeDerived(); state.hp = d.maxHp; state.sp = d.maxSp;
+      log(`[ADMIN] Class -> ${j}`, 'info'); UI.renderAll();
+    },
+    giveAllPremium() {
+      for (const id of Object.keys(CASH_ITEMS_DEF)) addItem(id, 1);
+      log('[ADMIN] Granted all premium items.', 'info'); UI.renderAll();
+    },
+    giveAllCards() {
+      for (const id of Object.keys(ITEMS)) {
+        if (id.endsWith('_card')) addItem(id, 1);
+      }
+      log('[ADMIN] Granted all cards.', 'info'); UI.renderAll();
+    },
+    fillHpSp() { const d = computeDerived(); state.hp = d.maxHp; state.sp = d.maxSp; UI.updateBars(); },
+    godBoost(on) {
+      state.adminBoost = !!on;
+      log(`[ADMIN] God boost ${on ? 'ON' : 'OFF'}`, 'info'); UI.renderAdmin();
+    },
+    grantVip(days) {
+      const d = parseInt(days, 10) || 7;
+      state.vipUntil = Math.max(state.vipUntil, Date.now()) + d * 24 * 3600 * 1000;
+      log(`[ADMIN] +${d} days VIP`, 'info'); UI.renderAll();
+    },
+    spawnBoss(id) {
+      if (!MONSTERS[id] || !MONSTERS[id].boss) { toast('Pick a valid boss'); return; }
+      forceSpawnBoss(id);
+    },
+    giveItem(id, n) {
+      if (!ITEMS[id]) { toast('Unknown item id'); return; }
+      addItem(id, n || 1); log(`[ADMIN] +${n||1} ${ITEMS[id].name}`, 'info'); UI.renderAll();
+    },
+    killEnemy() {
+      if (enemy) { enemy.hp = 0; onEnemyDead(); }
+    },
+    wipeSave() {
+      if (!confirm('Wipe save and reload?')) return;
+      localStorage.removeItem(SAVE_KEY); location.reload();
+    },
+  };
+  // Expose for console access too
+  window.Admin = Admin;
 
   function equipItem(id) {
     const it = ITEMS[id]; if (!it || it.type !== 'equip') return;
@@ -647,9 +949,10 @@
     const killsPerSec = clamp(dps / ehp, 0.05, 5);
     const kills = Math.floor(killsPerSec * dt * 0.6); // 60% efficiency offline
     if (kills <= 0) return;
-    const expG = Math.floor(tpl.exp * scale * kills);
-    const jexpG = Math.floor(tpl.jexp * scale * kills);
-    const zenyG = Math.floor(((tpl.zeny[0] + tpl.zeny[1]) / 2) * scale * kills * (1 + (d.zenyPct || 0)));
+    const mult = buffMultipliers();
+    const expG = Math.floor(tpl.exp * scale * kills * mult.exp);
+    const jexpG = Math.floor(tpl.jexp * scale * kills * mult.exp);
+    const zenyG = Math.floor(((tpl.zeny[0] + tpl.zeny[1]) / 2) * scale * kills * (1 + (d.zenyPct || 0)) * mult.zeny);
     state.exp += expG; state.jexp += jexpG; state.zeny += zenyG;
     state.killCounts[monsterId] = (state.killCounts[monsterId] || 0) + kills;
     state.killCounts['_map_' + map.id] = (state.killCounts['_map_' + map.id] || 0) + kills;
@@ -676,17 +979,29 @@
       this.renderSkills();
       this.renderInventory();
       this.renderShop();
+      this.renderCash();
       this.renderLoot();
       this.renderQuests();
       this.renderJobChange();
+      this.renderAdmin();
       this.updateBars();
     },
     renderTop() {
       $('zeny').textContent = state.zeny.toLocaleString();
+      $('cash').textContent = (state.cash || 0).toLocaleString();
       $('baseLv').textContent = state.baseLv;
       $('jobLv').textContent = state.jobLv;
       $('statPts').textContent = state.statPoints;
       $('skillPts').textContent = state.skillPoints;
+      const vipBadge = $('vipBadge');
+      if (vipBadge) {
+        if (isVip()) {
+          vipBadge.hidden = false;
+          $('vipRemain').textContent = formatTime((state.vipUntil - Date.now()) / 1000);
+        } else {
+          vipBadge.hidden = true;
+        }
+      }
     },
     renderChar() {
       const j = jobDef();
@@ -773,10 +1088,20 @@
         $('enemyHpText').textContent = `${Math.max(0, Math.floor(enemy.hp))}/${enemy.maxHp}`;
       }
       $('zeny').textContent = state.zeny.toLocaleString();
+      $('cash').textContent = (state.cash || 0).toLocaleString();
       $('baseLv').textContent = state.baseLv;
       $('jobLv').textContent = state.jobLv;
       $('statPts').textContent = state.statPoints;
       $('skillPts').textContent = state.skillPoints;
+      const vipBadge = $('vipBadge');
+      if (vipBadge) {
+        if (isVip()) {
+          vipBadge.hidden = false;
+          $('vipRemain').textContent = formatTime((state.vipUntil - Date.now()) / 1000);
+        } else {
+          vipBadge.hidden = true;
+        }
+      }
     },
     renderMaps() {
       const wrap = $('mapTabs');
@@ -950,6 +1275,185 @@
         list.appendChild(li);
       }
     },
+    renderCash() {
+      const balance = $('cashBalance'); if (balance) balance.textContent = state.cash.toLocaleString();
+      const vip = $('vipStatus');
+      if (vip) {
+        if (isVip()) {
+          const remain = state.vipUntil - Date.now();
+          vip.innerHTML = `<span class="vip-on">👑 VIP active · ${formatTime(remain / 1000)} left</span>`;
+        } else {
+          vip.textContent = 'No VIP';
+        }
+      }
+      // Buff list
+      const buffWrap = $('buffList');
+      if (buffWrap) {
+        buffWrap.innerHTML = '';
+        const active = [];
+        if (isVip()) active.push({ name: '👑 VIP', remain: state.vipUntil - Date.now(), color: '#f6c453' });
+        for (const id of Object.keys(state.buffs || {})) {
+          if (state.buffs[id] && state.buffs[id] > Date.now()) {
+            const it = ITEMS[id];
+            active.push({ name: it ? it.name : id, remain: state.buffs[id] - Date.now(), color: '#b186ff' });
+          }
+        }
+        if (active.length === 0) {
+          buffWrap.innerHTML = `<div class="buff-empty">No buffs active.</div>`;
+        } else {
+          for (const b of active) {
+            const div = document.createElement('div');
+            div.className = 'buff-pill';
+            div.style.borderColor = b.color;
+            div.style.color = b.color;
+            div.innerHTML = `<b>${b.name}</b> <span>${formatTime(b.remain / 1000)}</span>`;
+            buffWrap.appendChild(div);
+          }
+        }
+      }
+      // Categories
+      const cats = $('cashCats');
+      if (cats) {
+        cats.innerHTML = '';
+        for (const c of CASH_CATEGORIES) {
+          const b = document.createElement('button');
+          b.textContent = c.name;
+          b.className = 'shop-cat' + (state.cashCat === c.id ? ' active' : '');
+          b.onclick = () => { state.cashCat = c.id; UI.renderCash(); };
+          cats.appendChild(b);
+        }
+      }
+      const list = $('cashList');
+      if (!list) return;
+      list.innerHTML = '';
+      if (state.cashCat === 'gacha') {
+        const g = document.createElement('li');
+        g.className = 'shop-item gacha-card';
+        const pity = state.pityCount || 0;
+        g.innerHTML = `
+          <div class="iname">🎰 Mythic Gacha</div>
+          <div class="buy-actions">
+            <button data-gacha="1" class="primary" ${state.cash < GACHA.cost ? 'disabled' : ''}>Pull ×1 (${GACHA.cost} 💎)</button>
+            <button data-gacha="10" class="primary" ${state.cash < GACHA.cost10 ? 'disabled' : ''}>Pull ×10 (${GACHA.cost10} 💎)</button>
+          </div>
+          <div class="idesc">
+            Chance for Excalibur, Valkyrie Armor, Megingjörð, Brisingamen, MVP cards.<br>
+            Pity: <b>${pity}</b>/${GACHA.pity} — guaranteed legendary at pity.
+          </div>`;
+        list.appendChild(g);
+        // Recent pulls
+        if (state.gachaHistory.length) {
+          const hist = document.createElement('li');
+          hist.className = 'gacha-history';
+          hist.innerHTML = `<div class="iname">Recent Pulls</div><div></div>
+            <div class="idesc">${state.gachaHistory.slice(0, 12).map(h => {
+              const it = ITEMS[h.id]; const r = RARITY[h.rarity || 'common'];
+              return `<span style="color:${r.color}">${it ? it.name : h.id}</span>`;
+            }).join(' · ')}</div>`;
+          list.appendChild(hist);
+        }
+        els('button[data-gacha]', list).forEach(b => b.onclick = () => gachaPull(parseInt(b.dataset.gacha, 10)));
+      } else {
+        const items = CASH_SHOP.filter(s => s.cat === state.cashCat);
+        for (const s of items) {
+          const it = ITEMS[s.id];
+          if (!it) continue;
+          const r = RARITY[it.rarity || 'common'];
+          const can = state.cash >= s.cost;
+          const li = document.createElement('li');
+          li.className = 'shop-item' + (can ? '' : ' unaffordable');
+          li.dataset.rarity = it.rarity || 'common';
+          li.innerHTML = `
+            <div class="iname" style="color:${r.color}">${it.name} <span class="rarity-tag" style="color:${r.color};border-color:${r.color}">${r.name}</span></div>
+            <div class="buy-actions">
+              <span class="price cash-price">${s.cost.toLocaleString()} 💎</span>
+              <button data-cashbuy="${s.id}" ${can ? '' : 'disabled'}>Buy</button>
+            </div>
+            <div class="idesc">${it.desc}</div>`;
+          list.appendChild(li);
+        }
+        els('button[data-cashbuy]', list).forEach(b => b.onclick = () => buyCash(b.dataset.cashbuy));
+      }
+    },
+    renderTopUp() {
+      const list = $('topupList');
+      if (!list) return;
+      list.innerHTML = '';
+      for (const p of CASH_TOPUP) {
+        const li = document.createElement('li');
+        li.className = 'topup-item';
+        li.innerHTML = `
+          <div class="topup-name">${p.name} <span class="topup-price">${p.label}</span></div>
+          <div class="topup-coins">+${p.coins.toLocaleString()} 💎 ${p.bonus ? `<em>+${p.bonus.toLocaleString()} bonus</em>` : ''}</div>
+          <button class="primary" data-topup="${p.id}">Buy</button>`;
+        list.appendChild(li);
+      }
+      els('button[data-topup]', list).forEach(b => b.onclick = () => {
+        topUp(b.dataset.topup);
+        $('topupModal').hidden = true;
+      });
+    },
+    showGachaResult(results) {
+      const wrap = $('gachaResult');
+      if (!wrap) return;
+      wrap.innerHTML = '';
+      for (const r of results) {
+        const div = document.createElement('div');
+        div.className = `gacha-card-result rarity-${r.rarity}`;
+        div.style.borderColor = r.color;
+        div.innerHTML = `<div class="g-name" style="color:${r.color}">${r.name}</div><div class="g-rarity" style="color:${r.color}">${RARITY[r.rarity]?.name || r.rarity}</div>`;
+        wrap.appendChild(div);
+      }
+      $('gachaModal').hidden = false;
+    },
+    renderAdmin() {
+      const tabBtn = $('adminTabBtn');
+      if (tabBtn) tabBtn.hidden = !state.admin;
+      const body = $('adminBody');
+      if (!body) return;
+      if (!state.admin) { body.innerHTML = '<p>Locked. Click the logo 3× or open with <code>?admin=1</code>.</p>'; return; }
+      const jobOptions = Object.keys(JOBS).map(j => `<option ${state.job === j ? 'selected' : ''}>${j}</option>`).join('');
+      const bossOptions = Object.keys(MONSTERS).filter(k => MONSTERS[k].boss).map(k => `<option value="${k}">${MONSTERS[k].name}</option>`).join('');
+      body.innerHTML = `
+        <div class="admin-grid">
+          <div class="admin-section">
+            <h4>Currency</h4>
+            <div class="row"><button data-cmd="zeny1k">+1,000 z</button><button data-cmd="zeny100k">+100,000 z</button><button data-cmd="zeny10m">+10,000,000 z</button></div>
+            <div class="row"><button data-cmd="cash100">+100 💎</button><button data-cmd="cash1k">+1,000 💎</button><button data-cmd="cash100k">+100,000 💎</button></div>
+          </div>
+          <div class="admin-section">
+            <h4>Progression</h4>
+            <div class="row"><button data-cmd="exp">+1 Lv EXP</button><button data-cmd="jexp">+1 Lv JEXP</button><button data-cmd="stat">+10 stat pts</button><button data-cmd="skill">+5 skill pts</button></div>
+            <div class="row"><label>Set Lv: <input type="number" id="adminSetLv" value="${state.baseLv}" min="1" max="200" style="width:80px"/></label> <button data-cmd="setLv">Apply</button></div>
+            <div class="row"><label>Job: <select id="adminJob">${jobOptions}</select></label> <button data-cmd="setJob">Change</button></div>
+          </div>
+          <div class="admin-section">
+            <h4>VIP & Buffs</h4>
+            <div class="row"><button data-cmd="vip7">+7d VIP</button><button data-cmd="vip30">+30d VIP</button><button data-cmd="vipOff">Clear VIP</button></div>
+            <div class="row"><button data-cmd="godBoost" id="btnGodBoost" class="${state.adminBoost ? 'primary' : 'ghost'}">God Boost: ${state.adminBoost ? 'ON' : 'OFF'}</button> <span class="hint">×10 EXP, ×5 drop, ×10 zeny</span></div>
+          </div>
+          <div class="admin-section">
+            <h4>Items</h4>
+            <div class="row"><button data-cmd="allPremium">Give all premium gear</button><button data-cmd="allCards">Give all cards</button></div>
+            <div class="row">
+              <input type="text" id="adminItemId" placeholder="item id (e.g. oridecon)" style="flex:1"/>
+              <input type="number" id="adminItemN" value="1" min="1" style="width:60px"/>
+              <button data-cmd="giveItem">Give</button>
+            </div>
+          </div>
+          <div class="admin-section">
+            <h4>Combat</h4>
+            <div class="row"><button data-cmd="kill">Insta-kill enemy</button><button data-cmd="heal">Full restore</button></div>
+            <div class="row"><label>Boss: <select id="adminBoss">${bossOptions}</select></label> <button data-cmd="spawnBoss">Spawn</button></div>
+          </div>
+          <div class="admin-section danger">
+            <h4>Danger Zone</h4>
+            <div class="row"><button data-cmd="lock" class="ghost">Lock admin</button><button data-cmd="wipe" class="ghost danger">Wipe save</button></div>
+          </div>
+        </div>
+      `;
+      els('button[data-cmd]', body).forEach(b => b.onclick = () => onAdminCmd(b.dataset.cmd));
+    },
     renderQuests() {
       const list = $('questList');
       list.innerHTML = '';
@@ -1122,6 +1626,63 @@
         UI.renderAll();
       };
     });
+    // Top-up modal + Daily reward + Gacha re-pull
+    const btnTopUp = $('btnTopUp');
+    if (btnTopUp) btnTopUp.onclick = () => { UI.renderTopUp(); $('topupModal').hidden = false; };
+    const btnDaily = $('btnDaily');
+    if (btnDaily) btnDaily.onclick = () => claimDaily();
+    els('[data-close-modal]').forEach(b => b.onclick = () => { const m = $(b.dataset.closeModal); if (m) m.hidden = true; });
+    els('.modal-backdrop').forEach(bg => bg.addEventListener('click', (e) => { if (e.target === bg) bg.hidden = true; }));
+    const g1 = $('btnGacha1Again'); if (g1) g1.onclick = () => { $('gachaModal').hidden = true; gachaPull(1); };
+    const g10 = $('btnGacha10Again'); if (g10) g10.onclick = () => { $('gachaModal').hidden = true; gachaPull(10); };
+    // Logo: triple-click to unlock admin
+    let logoClicks = 0; let logoTimer = 0;
+    const logo = el('.brand .logo');
+    if (logo) {
+      logo.style.cursor = 'pointer';
+      logo.onclick = () => {
+        logoClicks += 1;
+        clearTimeout(logoTimer);
+        logoTimer = setTimeout(() => logoClicks = 0, 600);
+        if (logoClicks >= 3) {
+          logoClicks = 0;
+          if (state.admin) {
+            Admin.lock(); toast('Admin locked');
+          } else {
+            Admin.unlock();
+          }
+        }
+      };
+    }
+  }
+
+  function onAdminCmd(cmd) {
+    switch (cmd) {
+      case 'zeny1k': Admin.addZeny(1000); break;
+      case 'zeny100k': Admin.addZeny(100000); break;
+      case 'zeny10m': Admin.addZeny(10000000); break;
+      case 'cash100': Admin.addCash(100); break;
+      case 'cash1k': Admin.addCash(1000); break;
+      case 'cash100k': Admin.addCash(100000); break;
+      case 'exp': Admin.addExp(expForBaseLevel(state.baseLv)); break;
+      case 'jexp': Admin.addJexp(expForJobLevel(state.jobLv)); break;
+      case 'stat': Admin.addStat(10); break;
+      case 'skill': Admin.addSkill(5); break;
+      case 'setLv': Admin.setLevel($('adminSetLv').value); break;
+      case 'setJob': Admin.becomeJob($('adminJob').value); break;
+      case 'vip7': Admin.grantVip(7); break;
+      case 'vip30': Admin.grantVip(30); break;
+      case 'vipOff': state.vipUntil = 0; UI.renderAll(); break;
+      case 'godBoost': Admin.godBoost(!state.adminBoost); break;
+      case 'allPremium': Admin.giveAllPremium(); break;
+      case 'allCards': Admin.giveAllCards(); break;
+      case 'giveItem': Admin.giveItem($('adminItemId').value.trim(), parseInt($('adminItemN').value, 10) || 1); break;
+      case 'kill': Admin.killEnemy(); break;
+      case 'heal': Admin.fillHpSp(); break;
+      case 'spawnBoss': Admin.spawnBoss($('adminBoss').value); break;
+      case 'lock': Admin.lock(); break;
+      case 'wipe': Admin.wipeSave(); break;
+    }
   }
 
   let loopId = null;
@@ -1157,6 +1718,12 @@
   function init() {
     const has = !!localStorage.getItem(SAVE_KEY);
     showBoot(has);
+    // Auto-enable admin via ?admin=1
+    if (location.search.includes('admin=1')) {
+      // Wait for game to start
+      const tryEnable = () => { if (state && state.name) { state.admin = true; UI.renderAdmin && UI.renderAdmin(); } else setTimeout(tryEnable, 500); };
+      setTimeout(tryEnable, 500);
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);

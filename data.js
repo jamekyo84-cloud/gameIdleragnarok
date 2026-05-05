@@ -426,3 +426,124 @@ function expForBaseLevel(lv) {
 function expForJobLevel(lv) {
   return Math.floor(40 * Math.pow(lv, 1.65) + 25 * lv);
 }
+
+// ----------------------------------------------------------------
+// PAY-TO-WIN: Cash shop, top-up packages, gacha, VIP
+// (this is a fan game with a pretend currency — no real billing)
+// ----------------------------------------------------------------
+
+// Premium equipment available only via Cash Shop or gacha. These are
+// stronger than craftable gear of the same tier on purpose.
+const CASH_ITEMS_DEF = {
+  vip_card_7d:   { name: 'VIP Card (7 Days)', desc: '+50% EXP, +30% drop, +20% zeny while active.', type: 'voucher', rarity: 'legendary' },
+  vip_card_30d:  { name: 'VIP Card (30 Days)',desc: '+50% EXP, +30% drop, +20% zeny while active.', type: 'voucher', rarity: 'legendary' },
+  exp_scroll_2x: { name: 'EXP Scroll x2 (1h)', desc: 'Doubles EXP gain for 1 hour.', type: 'voucher', rarity: 'rare' },
+  drop_scroll_2x:{ name: 'Drop Scroll x2 (1h)', desc: 'Doubles drop chance for 1 hour.', type: 'voucher', rarity: 'rare' },
+  zeny_scroll_2x:{ name: 'Zeny Scroll x2 (1h)', desc: 'Doubles zeny earned for 1 hour.', type: 'voucher', rarity: 'rare' },
+  bubble_gum:    { name: 'Bubble Gum (30m)',  desc: 'Doubles drop chance for 30 minutes.', type: 'voucher', rarity: 'rare' },
+  battle_manual: { name: 'Battle Manual (30m)', desc: 'x1.5 EXP & JEXP for 30 minutes.', type: 'voucher', rarity: 'rare' },
+  bloody_branch: { name: 'Bloody Branch',     desc: 'Summons a random boss right now.', type: 'voucher', rarity: 'epic' },
+  reset_stone:   { name: 'Stat Reset Stone',  desc: 'Refunds all stat points.', type: 'voucher', rarity: 'epic' },
+  skill_reset:   { name: 'Skill Reset Stone', desc: 'Refunds all skill points.', type: 'voucher', rarity: 'epic' },
+  full_restore:  { name: 'Full Restore',      desc: 'Refill HP/SP instantly.', type: 'voucher', rarity: 'common' },
+  // Premium equipment
+  excalibur:     { name: 'Excalibur',         desc: '+200 ATK, +10 STR, +5% crit. (Cash)', type: 'equip', slot: 'weapon', mods: { atk: 200, str: 10, crit: 5 }, sell: 0, rarity: 'mythic' },
+  staff_of_destruction: { name: 'Staff of Destruction', desc: '+200 MATK, +15 INT, +50 SP. (Cash)', type: 'equip', slot: 'weapon', mods: { matk: 200, int: 15, maxSp: 50 }, sell: 0, rarity: 'mythic' },
+  valk_armor:    { name: 'Valkyrie Armor',    desc: '+120 DEF, +300 HP, +5 to all stats. (Cash)', type: 'equip', slot: 'armor', mods: { def: 120, maxHp: 300, str: 5, agi: 5, vit: 5, int: 5, dex: 5, luk: 5 }, sell: 0, rarity: 'mythic' },
+  meginjard:     { name: "Megingjörð",        desc: '+40 STR, +200 max HP. Belt of giants. (Cash)', type: 'equip', slot: 'accessory', mods: { str: 40, maxHp: 200 }, sell: 0, rarity: 'mythic' },
+  brisingamen:   { name: 'Brisingamen',       desc: '+6 to all stats, +200 SP. (Cash)', type: 'equip', slot: 'accessory', mods: { str: 6, agi: 6, vit: 6, int: 6, dex: 6, luk: 6, maxSp: 200 }, sell: 0, rarity: 'mythic' },
+  golden_axe:    { name: 'Golden Axe',        desc: '+150 ATK, +20% zeny gain. (Cash)', type: 'equip', slot: 'weapon', mods: { atk: 150, zenyPctBonus: 0.20 }, sell: 0, rarity: 'legendary' },
+  angel_wings:   { name: 'Angel Wings',       desc: '+30 DEF, +20% EXP gain. (Cash)', type: 'equip', slot: 'armor', mods: { def: 30, expPctBonus: 0.20, maxHp: 100 }, sell: 0, rarity: 'legendary' },
+};
+
+// Merge premium items into the master ITEMS table so equip/inventory work seamlessly.
+for (const k of Object.keys(CASH_ITEMS_DEF)) ITEMS[k] = Object.assign({ cash: true }, CASH_ITEMS_DEF[k]);
+
+// Top-up packages — simulated currency purchase (NOT real money).
+const CASH_TOPUP = [
+  { id: 'starter',  name: 'Starter Pouch',     coins: 100,    bonus: 0,    label: '$0.99'  },
+  { id: 'small',    name: 'Adventurer Pouch',  coins: 500,    bonus: 50,   label: '$4.99'  },
+  { id: 'medium',   name: 'Knight Chest',      coins: 1200,   bonus: 200,  label: '$9.99'  },
+  { id: 'large',    name: 'Lord Chest',        coins: 2800,   bonus: 700,  label: '$19.99' },
+  { id: 'mega',     name: 'Valkyrie Chest',    coins: 7500,   bonus: 2500, label: '$49.99' },
+  { id: 'whale',    name: 'God Chest',         coins: 16000,  bonus: 6000, label: '$99.99' },
+];
+
+// Cash shop catalog — costs are in Kafra Coins (cash).
+const CASH_SHOP = [
+  // Buffs / boosters
+  { id: 'battle_manual', cost: 60,    cat: 'buffs' },
+  { id: 'bubble_gum',    cost: 80,    cat: 'buffs' },
+  { id: 'exp_scroll_2x', cost: 120,   cat: 'buffs' },
+  { id: 'drop_scroll_2x',cost: 150,   cat: 'buffs' },
+  { id: 'zeny_scroll_2x',cost: 100,   cat: 'buffs' },
+  { id: 'full_restore',  cost: 5,     cat: 'buffs' },
+  { id: 'bloody_branch', cost: 50,    cat: 'buffs' },
+  { id: 'reset_stone',   cost: 200,   cat: 'buffs' },
+  { id: 'skill_reset',   cost: 200,   cat: 'buffs' },
+  // VIP
+  { id: 'vip_card_7d',   cost: 350,   cat: 'vip' },
+  { id: 'vip_card_30d',  cost: 1200,  cat: 'vip' },
+  // Premium gear
+  { id: 'angel_wings',   cost: 1500,  cat: 'gear' },
+  { id: 'golden_axe',    cost: 1800,  cat: 'gear' },
+  { id: 'meginjard',     cost: 3500,  cat: 'gear' },
+  { id: 'brisingamen',   cost: 4200,  cat: 'gear' },
+  { id: 'excalibur',     cost: 6000,  cat: 'gear' },
+  { id: 'staff_of_destruction', cost: 6000, cat: 'gear' },
+  { id: 'valk_armor',    cost: 8500,  cat: 'gear' },
+];
+
+const CASH_CATEGORIES = [
+  { id: 'buffs', name: 'Buffs & Scrolls' },
+  { id: 'vip',   name: 'VIP' },
+  { id: 'gear',  name: 'Premium Gear' },
+  { id: 'gacha', name: 'Gacha 🎰' },
+];
+
+// Gacha — single & 10-pull. Probabilities sum need not be 1; engine renormalizes.
+const GACHA = {
+  cost: 100,        // per pull
+  cost10: 900,      // 10-pull (10% off)
+  pity: 50,         // 1 guaranteed legendary every 50 pulls
+  pool: [
+    // [itemId, weight, isFeatured]
+    // common (junk loot)
+    ['red_potion', 200],
+    ['orange_potion', 150],
+    ['yellow_potion', 80],
+    ['white_potion', 30],
+    ['blue_potion', 60],
+    ['oridecon', 40],
+    ['elunium', 40],
+    // rare
+    ['rosary', 25],
+    ['brooch', 25],
+    ['red_glasses', 22],
+    ['claymore', 18],
+    ['gakkung_bow', 18],
+    ['katana', 18],
+    ['saints_robe', 16],
+    // epic
+    ['flamberge', 8],
+    ['archmage_staff', 8],
+    ['mithril_armor', 6],
+    ['bunny_band', 4],
+    ['ring_of_muscle', 3],
+    // legendary cash gear
+    ['angel_wings', 0.8],
+    ['golden_axe', 0.8],
+    // mythic
+    ['excalibur', 0.18],
+    ['staff_of_destruction', 0.18],
+    ['valk_armor', 0.12],
+    ['meginjard', 0.10],
+    ['brisingamen', 0.10],
+    ['baphomet_card', 0.06],
+    ['ghostring_card', 0.06],
+  ],
+};
+
+// Daily login rewards for Kafra Coins (free for everyone every 20h)
+const DAILY_REWARD = { coins: 25, label: 'Daily Login: +25 Kafra Coins' };
+const DAILY_COOLDOWN_MS = 20 * 3600 * 1000;

@@ -38,6 +38,8 @@
     </div>
     <div class="resources">
       <div class="res" title="Zeny — currency"><span class="ico">💰</span><span id="zeny">0</span> z</div>
+      <div class="res cash" title="Kafra Coins — premium"><span class="ico">💎</span><span id="cash">0</span></div>
+      <div class="res vip-badge" id="vipBadge" hidden title="VIP active"><span class="ico">👑</span><span id="vipRemain">VIP</span></div>
       <div class="res" title="Base Level"><span class="ico">★</span> Lv <span id="baseLv">1</span></div>
       <div class="res" title="Job Level"><span class="ico">✦</span> Job <span id="jobLv">1</span></div>
       <div class="res" title="Stat Points"><span class="ico">＋</span><span id="statPts">0</span></div>
@@ -131,8 +133,10 @@
         <button class="tab active" data-tab="skills">Skills</button>
         <button class="tab" data-tab="inv">Inventory</button>
         <button class="tab" data-tab="shop">Shop</button>
+        <button class="tab cash-tab" data-tab="cash">💎 Cash</button>
         <button class="tab" data-tab="loot">Loot</button>
         <button class="tab" data-tab="quests">Quests</button>
+        <button class="tab admin-tab" data-tab="admin" id="adminTabBtn" hidden>⚙ Admin</button>
       </div>
 
       <div class="tab-body" id="tab-skills">
@@ -162,9 +166,32 @@
         <ul class="shop-list" id="shopList"></ul>
       </div>
 
+      <div class="tab-body hidden" id="tab-cash">
+        <div class="cash-head">
+          <div>
+            <div class="block-head">💎 Kafra Cash Shop</div>
+            <div class="cash-balance">Balance: <b id="cashBalance">0</b> 💎 · <span id="vipStatus">No VIP</span></div>
+          </div>
+          <div class="cash-actions">
+            <button id="btnDaily" class="primary small">🎁 Daily +25 💎</button>
+            <button id="btnTopUp" class="ghost small">🛒 Top Up</button>
+          </div>
+        </div>
+        <div class="block-head">Active Buffs</div>
+        <div class="buff-list" id="buffList"></div>
+        <div class="cash-cats" id="cashCats"></div>
+        <ul class="cash-list" id="cashList"></ul>
+      </div>
+
       <div class="tab-body hidden" id="tab-loot">
         <div class="block-head">Recent Loot</div>
         <ul class="loot-list" id="lootList"></ul>
+      </div>
+
+      <div class="tab-body hidden" id="tab-admin">
+        <div class="block-head">⚙ Admin Panel</div>
+        <div class="admin-warn">Cheats — for testing only.</div>
+        <div id="adminBody"></div>
       </div>
 
       <div class="tab-body hidden" id="tab-quests">
@@ -175,6 +202,35 @@
   </main>
 
   <div id="toast" class="toast"></div>
+
+  <div class="modal-backdrop" id="topupModal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <span>💎 Top Up Kafra Coins</span>
+        <button class="modal-close" data-close-modal="topupModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-note">Pretend currency only — this is a fan game with no real billing. Pick a pack to add Kafra Coins to your wallet.</p>
+        <ul class="topup-list" id="topupList"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="gachaModal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <span>🎰 Gacha Result</span>
+        <button class="modal-close" data-close-modal="gachaModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="gachaResult" class="gacha-result"></div>
+        <div class="gacha-again">
+          <button id="btnGacha1Again" class="primary">Pull again ×1</button>
+          <button id="btnGacha10Again" class="primary">×10</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <footer class="footer">
     Ragnarok Idle — fan tribute · Saves locally in your browser · <span id="autosave">autosave on</span>

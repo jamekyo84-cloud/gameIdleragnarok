@@ -498,6 +498,158 @@ button.toggle.on { box-shadow: inset 0 0 0 2px #f6c45355, 0 2px 0 #00000099; }
 }
 .shop-item .discount { color: #6efc7c; font-style: normal; font-size: 10px; }
 
+/* Resources extras: Cash + VIP */
+.res.cash { border-color: #5a78c4; }
+.res.cash .ico { color: #6cc1ff; filter: drop-shadow(0 0 4px #6cc1ff66); }
+.vip-badge {
+  border-color: var(--gold) !important;
+  background: linear-gradient(180deg, #4a330a, #2a1a05) !important;
+  color: var(--gold);
+  animation: vipShine 3s ease-in-out infinite;
+}
+.vip-badge .ico { color: var(--gold); }
+@keyframes vipShine {
+  0%,100% { box-shadow: 0 0 0 0 rgba(246,196,83,0.0); }
+  50%     { box-shadow: 0 0 14px 2px rgba(246,196,83,0.5); }
+}
+
+/* Cash tab styling */
+.cash-tab { color: #6cc1ff !important; border-color: #5a78c4 !important; }
+.cash-tab.active { color: #fff !important; background: linear-gradient(180deg, #1f3a76, #0e1d40) !important; border-color: #6cc1ff !important; }
+.admin-tab { color: #ff6a6a !important; border-color: #884444 !important; }
+.admin-tab.active { color: #fff !important; background: linear-gradient(180deg, #5a1a1a, #2a0a0a) !important; border-color: #ff6a6a !important; }
+
+.cash-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 8px; margin-bottom: 6px; flex-wrap: wrap;
+}
+.cash-balance { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.cash-balance b { color: #6cc1ff; font-size: 14px; }
+.vip-on { color: var(--gold); font-weight: 700; }
+.cash-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.cash-cats { display: flex; gap: 4px; margin: 6px 0 8px; flex-wrap: wrap; }
+.cash-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 380px; overflow-y: auto;
+}
+.cash-price { color: #6cc1ff !important; }
+.gacha-card {
+  border: 2px solid var(--gold) !important;
+  background: linear-gradient(180deg, #2a1c10, #160a08) !important;
+  box-shadow: 0 0 18px rgba(246,196,83,0.2);
+}
+.gacha-history .idesc { font-size: 11px; line-height: 1.6; }
+.buff-list {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;
+  min-height: 24px;
+}
+.buff-pill {
+  border: 1px solid;
+  padding: 3px 8px; border-radius: 999px;
+  font-size: 11px;
+  background: rgba(0,0,0,0.25);
+  display: flex; gap: 6px; align-items: center;
+}
+.buff-pill span { color: var(--muted); font-family: 'Press Start 2P', monospace; font-size: 9px; }
+.buff-empty { color: var(--muted); font-size: 11px; padding: 2px 4px; }
+
+/* Admin panel */
+.admin-warn {
+  background: #2a0a0a; color: #ff8a8a;
+  border: 1px solid #884; border-radius: 4px;
+  padding: 6px 10px; font-size: 11px; margin-bottom: 8px;
+}
+.admin-grid { display: flex; flex-direction: column; gap: 10px; }
+.admin-section {
+  background: #150d24; border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px;
+}
+.admin-section h4 {
+  margin: 0 0 6px;
+  font-family: 'Press Start 2P', monospace; font-size: 10px;
+  color: var(--gold); text-transform: uppercase; letter-spacing: 1px;
+}
+.admin-section.danger h4 { color: #ff6a6a; }
+.admin-section .row {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  margin-bottom: 4px;
+}
+.admin-section .row:last-child { margin-bottom: 0; }
+.admin-section .row label { font-size: 11px; color: var(--muted); display: flex; gap: 4px; align-items: center; }
+.admin-section input, .admin-section select {
+  background: #0e0818; color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 3px 6px; font-family: inherit; font-size: 12px;
+}
+.admin-section button { padding: 4px 10px; font-size: 11px; }
+.admin-section .hint { color: var(--muted); font-size: 10px; }
+
+/* Modals */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 80;
+  background: rgba(8,5,16,0.75);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.modal-backdrop[hidden] { display: none; }
+.modal {
+  background: linear-gradient(180deg, #221636, #150d22);
+  border: 2px solid var(--border-light);
+  border-radius: 12px;
+  width: min(540px, 96vw);
+  max-height: 90vh;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow), 0 0 60px #f6c45322;
+}
+.modal-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  font-family: 'Press Start 2P', monospace; font-size: 12px;
+  color: var(--gold); letter-spacing: 1px;
+}
+.modal-close {
+  background: transparent; border: none; color: var(--muted);
+  font-size: 18px; cursor: pointer; padding: 0 8px; box-shadow: none;
+}
+.modal-body { padding: 14px; overflow-y: auto; }
+.modal-note { color: var(--muted); font-size: 12px; margin-top: 0; }
+.topup-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.topup-item {
+  background: #150d24; border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px;
+  display: grid; grid-template-columns: 1fr auto; gap: 6px;
+  align-items: center;
+}
+.topup-name { font-weight: 700; }
+.topup-price { color: var(--gold); font-size: 12px; margin-left: 6px; }
+.topup-coins { color: #6cc1ff; font-size: 12px; grid-column: 1; }
+.topup-coins em { color: #6efc7c; font-style: normal; margin-left: 4px; }
+.topup-item button { padding: 6px 12px; font-size: 12px; grid-row: 1 / 3; grid-column: 2; }
+
+.gacha-result {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.gacha-card-result {
+  background: linear-gradient(180deg, #2a1c40, #160d24);
+  border: 2px solid;
+  border-radius: 6px;
+  padding: 10px 6px;
+  text-align: center;
+  animation: gachaPop 0.4s ease;
+}
+.gacha-card-result.rarity-legendary { box-shadow: 0 0 18px rgba(246,196,83,0.3); }
+.gacha-card-result.rarity-mythic    { box-shadow: 0 0 22px rgba(255,106,106,0.5); animation: gachaPop 0.4s ease, mythicPulse 2.5s ease-in-out 0.4s infinite; }
+.g-name { font-weight: 700; font-size: 13px; }
+.g-rarity { font-family: 'Press Start 2P', monospace; font-size: 9px; margin-top: 4px; }
+.gacha-again { display: flex; gap: 6px; justify-content: center; }
+@keyframes gachaPop {
+  0% { transform: scale(0.5); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 .loot-list {
   list-style: none; margin: 0; padding: 0;
   display: flex; flex-direction: column; gap: 3px;
