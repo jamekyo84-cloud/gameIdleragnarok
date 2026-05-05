@@ -34,6 +34,10 @@
     questsActive: {},   // id -> progress
     questsDone: {},     // id -> true
     killCounts: {},     // monsterId -> count
+    discovered: {},     // itemId -> true (first time looted)
+    lootLog: [],        // recent loot entries [{id, n, t}]
+    shopCat: 'pots',
+    sellJunk: false,    // auto-sell junk on pickup
     lastTs: Date.now(),
     log: [],
   });
@@ -301,13 +305,29 @@
     UI.float(`+${expGain}`, 'exp', 'enemy');
     UI.float(`+${zenyGain}z`, 'zeny', 'enemy');
 
-    // Drop loot
+    // Boss guaranteed drop slot
+    if (enemy.boss) {
+      const tpl = MONSTERS[enemy.id];
+      const guaranteed = tpl && tpl.guaranteed;
+      if (guaranteed && guaranteed.length) {
+        const gid = pick(guaranteed);
+        addItem(gid, 1, { fromDrop: true });
+        const it = ITEMS[gid];
+        const r = RARITY[it?.rarity || 'common'];
+        UI.float(`★ ${it?.name || gid}!`, 'drop', 'enemy', r?.color);
+        log(`<b>${enemy.name}</b> dropped <b style="color:${r?.color}">${it?.name || gid}</b>! (boss bonus)`, 'ok');
+      }
+    }
+    // Random drops (LUK boosts proc rate slightly)
+    const lukBoost = 1 + (effStats().luk * 0.0015);
     for (const [itemId, chance] of (enemy.drops || [])) {
-      const lukBoost = 1 + (effStats().luk * 0.001);
       if (Math.random() < chance * lukBoost) {
-        addItem(itemId, 1);
-        UI.float(`${ITEMS[itemId]?.name || itemId}!`, 'drop', 'enemy');
-        log(`Looted <b>${ITEMS[itemId]?.name || itemId}</b>.`, 'info');
+        addItem(itemId, 1, { fromDrop: true });
+        const it = ITEMS[itemId];
+        const r = RARITY[it?.rarity || 'common'];
+        UI.float(`${it?.name || itemId}!`, 'drop', 'enemy', r?.color);
+        const rareTag = r && (r.name === 'Rare' || r.name === 'Epic' || r.name === 'Legendary' || r.name === 'Mythic') ? ` <em style="color:${r.color}">[${r.name}]</em>` : '';
+        log(`Looted <b style="color:${r?.color}">${it?.name || itemId}</b>${rareTag}.`, 'info');
       }
     }
 
@@ -399,8 +419,28 @@
   }
 
   // ---------------- Inventory / Shop ----------------
-  function addItem(id, n = 1) {
+  function addItem(id, n = 1, opts = {}) {
+    const it = ITEMS[id];
+    if (!it) return;
+    const isFirstTime = !state.discovered[id];
+    // Auto-sell junk if enabled and from drop
+    if (opts.fromDrop && state.sellJunk && it.rarity === 'junk' && it.sell) {
+      state.zeny += it.sell * n;
+      state.discovered[id] = true;
+      pushLoot(id, n, true);
+      return;
+    }
     state.inventory[id] = (state.inventory[id] || 0) + n;
+    state.discovered[id] = true;
+    if (opts.fromDrop) {
+      pushLoot(id, n, false);
+      const r = RARITY[it.rarity || 'common'];
+      if (r && r.toast) {
+        toast(`★ ${it.name} (${r.name})`);
+      } else if (isFirstTime) {
+        toast(`New: ${it.name}`);
+      }
+    }
   }
   function removeItem(id, n = 1) {
     if (!state.inventory[id]) return false;
@@ -408,16 +448,40 @@
     if (state.inventory[id] <= 0) delete state.inventory[id];
     return true;
   }
+  function pushLoot(id, n, sold) {
+    state.lootLog.unshift({ id, n, sold, t: Date.now() });
+    if (state.lootLog.length > 30) state.lootLog.length = 30;
+  }
 
-  function buy(id) {
+  function buy(id, n = 1) {
     const it = ITEMS[id];
     if (!it || !it.price) return;
     const d = computeDerived();
     const price = Math.max(1, Math.floor(it.price * (1 - (d.discount || 0))));
-    if (state.zeny < price) { toast('Not enough Zeny'); return; }
-    state.zeny -= price;
-    addItem(id, 1);
-    log(`Bought <b>${it.name}</b> for ${price} z.`, 'info');
+    const total = price * n;
+    if (state.zeny < total) { toast('Not enough Zeny'); return; }
+    state.zeny -= total;
+    addItem(id, n);
+    log(`Bought <b>${it.name}</b>${n > 1 ? ' ×'+n : ''} for ${total.toLocaleString()} z.`, 'info');
+    UI.renderAll();
+  }
+  function sellAllJunk() {
+    let total = 0, count = 0;
+    for (const id of Object.keys(state.inventory)) {
+      const it = ITEMS[id];
+      if (!it || it.rarity !== 'junk' || !it.sell) continue;
+      const n = state.inventory[id];
+      total += it.sell * n;
+      count += n;
+      delete state.inventory[id];
+    }
+    if (total > 0) {
+      state.zeny += total;
+      log(`Sold all junk: ${count} items for <b>${total.toLocaleString()} z</b>.`, 'ok');
+      toast(`+${total.toLocaleString()} z`);
+    } else {
+      toast('No junk to sell');
+    }
     UI.renderAll();
   }
 
@@ -612,6 +676,7 @@
       this.renderSkills();
       this.renderInventory();
       this.renderShop();
+      this.renderLoot();
       this.renderQuests();
       this.renderJobChange();
       this.updateBars();
@@ -674,11 +739,12 @@
       const e = $('enemySprite');
       e.classList.add('dying');
     },
-    float(text, kind, side) {
+    float(text, kind, side, color) {
       const root = $('floaters');
       const div = document.createElement('div');
       div.className = `float ${kind}`;
       div.innerHTML = text;
+      if (color) div.style.color = color;
       const arenaW = root.offsetWidth || 600;
       const x = side === 'enemy' ? arenaW - 90 + irand(-30, 30) : 80 + irand(-30, 30);
       const y = 90 + irand(-30, 30);
@@ -766,20 +832,48 @@
       const list = $('invList');
       list.innerHTML = '';
       const ids = Object.keys(state.inventory);
+      const tools = $('invTools');
+      if (tools) {
+        const junkCount = ids.filter(id => (ITEMS[id]?.rarity === 'junk')).length;
+        tools.innerHTML = `
+          <button id="btnSellJunk" class="ghost small" ${junkCount === 0 ? 'disabled' : ''}>Sell All Junk (${junkCount})</button>
+          <label class="auto-junk"><input type="checkbox" id="chkSellJunk" ${state.sellJunk ? 'checked' : ''}/> Auto-sell junk</label>
+        `;
+        const btn = $('btnSellJunk'); if (btn) btn.onclick = () => sellAllJunk();
+        const chk = $('chkSellJunk'); if (chk) chk.onchange = () => { state.sellJunk = chk.checked; toast(state.sellJunk ? 'Auto-selling junk on pickup' : 'Auto-sell off'); };
+      }
       if (ids.length === 0) {
         list.innerHTML = `<li class="inv-item"><div class="iname">Empty</div><div></div><div class="idesc">Defeat monsters to find loot.</div></li>`;
+        return;
       }
+      // Sort: equip > pot > loot, then by rarity desc, then name
+      const rarityOrder = ['mythic','legendary','epic','rare','uncommon','common','junk'];
+      const typeOrder = { equip: 0, pot: 1, loot: 2 };
+      ids.sort((a, b) => {
+        const ia = ITEMS[a], ib = ITEMS[b];
+        const ta = typeOrder[ia.type] ?? 9, tb = typeOrder[ib.type] ?? 9;
+        if (ta !== tb) return ta - tb;
+        const ra = rarityOrder.indexOf(ia.rarity || 'common');
+        const rb = rarityOrder.indexOf(ib.rarity || 'common');
+        if (ra !== rb) return ra - rb;
+        return (ia.name || '').localeCompare(ib.name || '');
+      });
       for (const id of ids) {
         const it = ITEMS[id]; if (!it) continue;
         const cnt = state.inventory[id];
+        const r = RARITY[it.rarity || 'common'];
         const li = document.createElement('li');
         li.className = 'inv-item';
+        li.dataset.rarity = it.rarity || 'common';
         const actions = [];
         if (it.type === 'pot') actions.push(`<button data-act="use" data-id="${id}">Use</button>`);
-        if (it.type === 'equip') actions.push(`<button data-act="equip" data-id="${id}">Equip</button>`);
+        if (it.type === 'equip') {
+          const equipped = Object.values(state.equipment).includes(id);
+          if (!equipped) actions.push(`<button data-act="equip" data-id="${id}">Equip</button>`);
+        }
         if (it.sell) actions.push(`<button data-act="sell" data-id="${id}">Sell ${it.sell}z</button>`);
         li.innerHTML = `
-          <div class="iname">${it.name} ×${cnt}</div>
+          <div class="iname" style="color:${r.color}">${it.name} <span class="x">×${cnt}</span> <span class="rarity-tag" style="color:${r.color};border-color:${r.color}">${r.name}</span></div>
           <div class="actions">${actions.join('')}</div>
           <div class="idesc">${it.desc}</div>`;
         list.appendChild(li);
@@ -794,23 +888,67 @@
       });
     },
     renderShop() {
+      // Categories tabs
+      const catWrap = $('shopCats');
+      if (catWrap) {
+        catWrap.innerHTML = '';
+        for (const c of SHOP_CATEGORIES) {
+          const b = document.createElement('button');
+          b.textContent = c.name;
+          b.className = 'shop-cat' + (state.shopCat === c.id ? ' active' : '');
+          b.onclick = () => { state.shopCat = c.id; UI.renderShop(); };
+          catWrap.appendChild(b);
+        }
+      }
       const list = $('shopList');
       list.innerHTML = '';
       const d = computeDerived();
-      for (const s of SHOP) {
+      const items = SHOP.filter(s => (s.cat || 'pots') === state.shopCat);
+      let any = false;
+      for (const s of items) {
         if (state.baseLv < s.minLv) continue;
+        any = true;
         const it = ITEMS[s.id];
+        const r = RARITY[it.rarity || 'common'];
         const price = Math.max(1, Math.floor(it.price * (1 - (d.discount || 0))));
-        const can = state.zeny >= price;
+        const can1 = state.zeny >= price;
+        const can10 = state.zeny >= price * 10;
+        const showX10 = it.type === 'pot';
         const li = document.createElement('li');
-        li.className = 'shop-item' + (can ? '' : ' unaffordable');
+        li.className = 'shop-item' + (can1 ? '' : ' unaffordable');
+        li.dataset.rarity = it.rarity || 'common';
         li.innerHTML = `
-          <div class="iname">${it.name}</div>
-          <div><span class="price">${price.toLocaleString()} z</span> <button data-buy="${s.id}" ${can ? '' : 'disabled'}>Buy</button></div>
-          <div class="idesc">${it.desc}</div>`;
+          <div class="iname" style="color:${r.color}">${it.name} <span class="rarity-tag" style="color:${r.color};border-color:${r.color}">${r.name}</span></div>
+          <div class="buy-actions">
+            <span class="price">${price.toLocaleString()} z</span>
+            <button data-buy="${s.id}" data-n="1" ${can1 ? '' : 'disabled'}>Buy</button>
+            ${showX10 ? `<button data-buy="${s.id}" data-n="10" ${can10 ? '' : 'disabled'} title="${(price*10).toLocaleString()} z">×10</button>` : ''}
+          </div>
+          <div class="idesc">${it.desc}${d.discount ? ` <em class="discount">(-${Math.round(d.discount*100)}%)</em>` : ''}</div>`;
         list.appendChild(li);
       }
-      els('button[data-buy]', list).forEach(b => b.onclick = () => buy(b.dataset.buy));
+      if (!any) {
+        list.innerHTML = `<li class="shop-item"><div class="iname">Locked</div><div></div><div class="idesc">Level up to unlock more goods in this category.</div></li>`;
+      }
+      els('button[data-buy]', list).forEach(b => b.onclick = () => buy(b.dataset.buy, parseInt(b.dataset.n, 10) || 1));
+    },
+    renderLoot() {
+      const list = $('lootList');
+      if (!list) return;
+      list.innerHTML = '';
+      if (!state.lootLog.length) {
+        list.innerHTML = `<li class="loot-entry"><div>No loot yet.</div></li>`;
+        return;
+      }
+      for (const e of state.lootLog) {
+        const it = ITEMS[e.id]; if (!it) continue;
+        const r = RARITY[it.rarity || 'common'];
+        const li = document.createElement('li');
+        li.className = 'loot-entry';
+        const time = new Date(e.t).toLocaleTimeString();
+        li.innerHTML = `<span class="loot-time">${time}</span> <span style="color:${r.color}">${it.name}${e.n > 1 ? ' ×'+e.n : ''}</span> <span class="loot-rarity" style="color:${r.color}">[${r.name}]</span> ${e.sold ? `<em class="loot-sold">auto-sold ${it.sell * e.n}z</em>` : ''}`;
+        list.appendChild(li);
+      }
     },
     renderQuests() {
       const list = $('questList');

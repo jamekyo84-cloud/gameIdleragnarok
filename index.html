@@ -131,6 +131,7 @@
         <button class="tab active" data-tab="skills">Skills</button>
         <button class="tab" data-tab="inv">Inventory</button>
         <button class="tab" data-tab="shop">Shop</button>
+        <button class="tab" data-tab="loot">Loot</button>
         <button class="tab" data-tab="quests">Quests</button>
       </div>
 
@@ -151,12 +152,19 @@
           <div class="slot" data-slot="accessory"><span class="slot-name">Accessory</span><span class="slot-item" id="eqAccessory">—</span></div>
         </div>
         <div class="block-head">Bag</div>
+        <div class="inv-tools" id="invTools"></div>
         <ul class="inv-list" id="invList"></ul>
       </div>
 
       <div class="tab-body hidden" id="tab-shop">
         <div class="block-head">Kafra Shop</div>
+        <div class="shop-cats" id="shopCats"></div>
         <ul class="shop-list" id="shopList"></ul>
+      </div>
+
+      <div class="tab-body hidden" id="tab-loot">
+        <div class="block-head">Recent Loot</div>
+        <ul class="loot-list" id="lootList"></ul>
       </div>
 
       <div class="tab-body hidden" id="tab-quests">
